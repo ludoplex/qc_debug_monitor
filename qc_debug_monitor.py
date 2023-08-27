@@ -103,13 +103,13 @@ class Singleton(type):
 
     _instances = {}
 
-    def __call__(cls, *args, **kwargs):
+    def __call__(self, *args, **kwargs):
 
-        if cls not in cls._instances:
+        if self not in self._instances:
 
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+            self._instances[self] = super(Singleton, self).__call__(*args, **kwargs)
 
-        return cls._instances[cls]
+        return self._instances[self]
 
 class DiagThread(Thread):
 
@@ -221,7 +221,7 @@ class DiagProt(DiagSerial):
 
         self.log_init(output_file)
 
-        self.logger.info('[+] Opening %s' % device_name)
+        self.logger.info(f'[+] Opening {device_name}')
 
         super(DiagProt, self).__init__(device_name, baudrate = baudrate)
 
@@ -304,7 +304,7 @@ class DiagProt(DiagSerial):
 
         # wait for the reply
         while self.model is None and self.revision is None:
-            
+
             if cnt >= self.CMD_TIMEOUT:
 
                 raise(Exception('VERNO_F reply timeout'))
@@ -312,7 +312,7 @@ class DiagProt(DiagSerial):
             time.sleep(1)
             cnt += 1
 
-        self.logger.info('[+] Device model: %s' % self.model)
+        self.logger.info(f'[+] Device model: {self.model}')
         self.logger.info('[+] Revision: %d' % self.revision)        
 
         return self.model, self.revision
@@ -329,13 +329,10 @@ class DiagProt(DiagSerial):
 
     def send_msg_config_set_rt_mask(self, ssid_start, ssid_end, on = True):
 
-        data = ''
-
-        # create masks list for specified subsystems
-        for i in range(0, ssid_end - ssid_start + 1):
-            
-            data += pack('<I', 0xffffffff if on else 0)
-
+        data = ''.join(
+            pack('<I', 0xFFFFFFFF if on else 0)
+            for _ in range(0, ssid_end - ssid_start + 1)
+        )
         # send request
         self.write(self.EXT_MSG_CONFIG_F, self.EXT_MSG_SUBCMD_SET_RT_MASK,
                    pack('<HHH', ssid_start, ssid_end, 0) + data)      
@@ -346,8 +343,6 @@ class DiagProt(DiagSerial):
 
     def recv_msg(self, data):
 
-        args_list = []
-
         if not self.initialized: return
 
         # parse EXT_MSG_F header
@@ -357,11 +352,10 @@ class DiagProt(DiagSerial):
         message = args[(num_args * 4) :]
         message, file_name, _ = message.split('\0')
 
-        for i in range(0, num_args):
-        
-            # get argument value
-            args_list.append(unpack('<I', args[(i * 4) : (i * 4) + 4])[0])
-
+        args_list = [
+            unpack('<I', args[(i * 4) : (i * 4) + 4])[0]
+            for i in range(0, num_args)
+        ]
         message = message.strip()
         file_name = file_name.strip()
 
@@ -372,15 +366,13 @@ class DiagProt(DiagSerial):
         except:
 
             self.logger.error('[!] EXT_MSG_F format string error for "%s" (%d args)' % \
-                              (message, num_args))
+                                  (message, num_args))
             return
 
         # process message
         self.handle_message(ssid, message, file_name, line)
 
     def recv_msg_terse(self, data):
-
-        args_list = []
 
         if not self.initialized: return
 
@@ -389,11 +381,10 @@ class DiagProt(DiagSerial):
 
         args = data[23 :]
 
-        for i in range(0, num_args):
-        
-            # get argument value
-            args_list.append(unpack('<I', args[(i * 4) : (i * 4) + 4])[0])
-
+        args_list = [
+            unpack('<I', args[(i * 4) : (i * 4) + 4])[0]
+            for i in range(0, num_args)
+        ]
         # process message
         self.handle_message_terse(ssid, line, msg, args_list)
 
@@ -495,18 +486,16 @@ class DiagSubsystemsFinder(DiagProt):
         if count > 0:
 
             # valid subsystem ID was found
-            if self.ssid_end is not None:
+            if self.ssid_end is None: self.ssid_start = self.ssid_end = ssid
 
-                if self.ssid_end + 1 != ssid:
+            elif self.ssid_end + 1 != ssid:
 
-                    print('0x%.4x:0x%.4x' % (self.ssid_start, self.ssid_end))
+                print('0x%.4x:0x%.4x' % (self.ssid_start, self.ssid_end))
 
-                    self.known_subsystems.append((self.ssid_start, self.ssid_end))
-                    self.ssid_start = self.ssid_end = ssid
+                self.known_subsystems.append((self.ssid_start, self.ssid_end))
+                self.ssid_start = self.ssid_end = ssid
 
-                else: self.ssid_end += 1
-
-            else: self.ssid_start = self.ssid_end = ssid
+            else: self.ssid_end += 1
 
     def start(self):
 
@@ -571,24 +560,18 @@ class DiagLogger(DiagProt):
 
         if TIMESTAMP is not None:
 
-            timestamp = '[%s] ' % time.strftime(TIMESTAMP, time.localtime(time.time()))
-            
+            timestamp = f'[{time.strftime(TIMESTAMP, time.localtime(time.time()))}] '
+
         if file_name is not None and line is not None:
 
             location = ' : %s(%d)' % (file_name, line)
 
         if self.subsystems is not None:
 
-            supress = True
-
-            for ssid_start, ssid_end in self.subsystems:
-
-                # check if we need to show message for given subsystem
-                if ssid >= ssid_start and ssid <= ssid_end:
-
-                    supress = False
-                    break
-
+            supress = not any(
+                ssid >= ssid_start and ssid <= ssid_end
+                for ssid_start, ssid_end in self.subsystems
+            )
         message = '%s0x%.4x%s : %s' % (timestamp, ssid, location, message)
 
         if not supress:
@@ -637,7 +620,7 @@ class DiagLogger(DiagProt):
 
         if hash_db_path is not None: 
 
-            print('[+] Loading hash DB from %s' % hash_db_path)
+            print(f'[+] Loading hash DB from {hash_db_path}')
 
             self.terse_hash_db = self.terse_load_hash_db(hash_db_path)
 
@@ -650,10 +633,7 @@ class DiagLogger(DiagProt):
         # load messages hash DB from file
         with open(file_path, 'rb') as fd:
 
-            line = fd.readline()
-
-            while line:
-               
+            while line := fd.readline():
                 items = line.strip().split(',')
                 if len(items) > 2:
 
@@ -672,8 +652,6 @@ class DiagLogger(DiagProt):
 
                         ret[val] = ( msg_file, msg_text )
 
-
-                line = fd.readline()
 
         return ret
 
@@ -829,7 +807,7 @@ def main():
 
                 ssid_range = ssid_range.strip().replace(',', ':').split(':')
 
-                assert len(ssid_range) in [ 1, 2 ]
+                assert len(ssid_range) in {1, 2}
 
                 if len(ssid_range) == 1:
 
@@ -848,11 +826,11 @@ def main():
             return -1    
 
     if options.find_subsystems:
-    
+
         diag = DiagSubsystemsFinder(options.device_name, output_file = options.output_file,
                                                          baudrate = options.baudrate)
         try:
-        
+
             diag.start()
 
         except KeyboardInterrupt:
@@ -893,7 +871,7 @@ def main():
         print('\nEXIT\n')
 
     pid_cleanup()
-    
+
     return 0
 
 if __name__ == '__main__':
